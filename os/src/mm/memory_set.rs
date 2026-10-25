@@ -262,6 +262,91 @@ impl MemorySet {
             false
         }
     }
+
+    /// Map `len` bytes of freshly allocated frames at `start_va`.
+    ///
+    /// `start_va` must be page aligned and `len` is rounded up to whole pages.
+    /// The range must not overlap any area that is already mapped; otherwise
+    /// `false` is returned and the user syscall reports `-1`.
+    pub fn mmap(&mut self, start_va: usize, len: usize, permission: MapPermission) -> bool {
+        if len == 0 || start_va % PAGE_SIZE != 0 {
+            return false;
+        }
+        let start_vpn: VirtPageNum = VirtAddr::from(start_va).floor();
+        let end_vpn: VirtPageNum = VirtAddr::from(start_va + len).ceil();
+        if end_vpn <= start_vpn {
+            return false;
+        }
+        let conflict = self.areas.iter().any(|area| {
+            area.vpn_range.get_start() < end_vpn && start_vpn < area.vpn_range.get_end()
+        });
+        if conflict {
+            return false;
+        }
+        self.push(
+            MapArea::new(
+                start_va.into(),
+                (start_va + len).into(),
+                MapType::Framed,
+                permission,
+            ),
+            None,
+        );
+        true
+    }
+
+    /// Unmap the area that covers exactly `[start_va, start_va + len)`.
+    ///
+    /// Only a complete area can be released; partially overlapping or
+    /// unaligned requests are rejected with `false`.
+    pub fn munmap(&mut self, start_va: usize, len: usize) -> bool {
+        if len == 0 || start_va % PAGE_SIZE != 0 {
+            return false;
+        }
+        let start_vpn: VirtPageNum = VirtAddr::from(start_va).floor();
+        let end_vpn: VirtPageNum = VirtAddr::from(start_va + len).ceil();
+        let position = self.areas.iter().position(|area| {
+            area.vpn_range.get_start() == start_vpn && area.vpn_range.get_end() == end_vpn
+        });
+        match position {
+            Some(index) => {
+                let mut area = self.areas.remove(index);
+                area.unmap(&mut self.page_table);
+                true
+            }
+            None => false,
+        }
+    }
+
+    /// Translate an address that belongs to one of this address space's user
+    /// areas into a physical address.
+    ///
+    /// Only areas carrying the `U` flag are considered, so kernel-only mappings
+    /// (the trampoline, the trap context, ...) are rejected; the permission bits
+    /// of the area decide whether the access is allowed.
+    pub fn translate_user(&self, va: VirtAddr, for_write: bool) -> Option<PhysAddr> {
+        let vpn = va.floor();
+        let area = self
+            .areas
+            .iter()
+            .find(|area| area.vpn_range.get_start() <= vpn && vpn < area.vpn_range.get_end())?;
+        if !area.map_perm.contains(MapPermission::U) {
+            return None;
+        }
+        let needed = if for_write {
+            MapPermission::W
+        } else {
+            MapPermission::R
+        };
+        if !area.map_perm.contains(needed) {
+            return None;
+        }
+        let pte = self.page_table.translate(vpn)?;
+        if !pte.is_valid() {
+            return None;
+        }
+        Some(pte.ppn().into())
+    }
 }
 /// map area structure, controls a contiguous piece of virtual memory
 pub struct MapArea {

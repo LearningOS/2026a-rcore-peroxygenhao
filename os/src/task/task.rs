@@ -1,6 +1,6 @@
 //! Types related to task management
 use super::TaskContext;
-use crate::config::TRAP_CONTEXT_BASE;
+use crate::config::{MAX_SYSCALL_NUM, TRAP_CONTEXT_BASE};
 use crate::mm::{
     kernel_stack_position, MapPermission, MemorySet, PhysPageNum, VirtAddr, KERNEL_SPACE,
 };
@@ -28,9 +28,38 @@ pub struct TaskControlBlock {
 
     /// Program break
     pub program_brk: usize,
+
+    /// How many times each syscall has been invoked by this task
+    pub syscall_count: [usize; MAX_SYSCALL_NUM],
 }
 
 impl TaskControlBlock {
+    /// Record one more invocation of the syscall `syscall_id` by this task.
+    pub fn add_syscall_count(&mut self, syscall_id: usize) {
+        if syscall_id < MAX_SYSCALL_NUM {
+            self.syscall_count[syscall_id] += 1;
+        }
+    }
+
+    /// How many times this task has invoked the syscall `syscall_id`.
+    pub fn get_syscall_count(&self, syscall_id: usize) -> usize {
+        if syscall_id < MAX_SYSCALL_NUM {
+            self.syscall_count[syscall_id]
+        } else {
+            0
+        }
+    }
+
+    /// Map `len` bytes of freshly allocated frames at `start_va` for this task.
+    pub fn mmap(&mut self, start_va: usize, len: usize, permission: MapPermission) -> bool {
+        self.memory_set.mmap(start_va, len, permission)
+    }
+
+    /// Unmap the area that covers exactly `[start_va, start_va + len)`.
+    pub fn munmap(&mut self, start_va: usize, len: usize) -> bool {
+        self.memory_set.munmap(start_va, len)
+    }
+
     /// get the trap context
     pub fn get_trap_cx(&self) -> &'static mut TrapContext {
         self.trap_cx_ppn.get_mut()
@@ -63,6 +92,7 @@ impl TaskControlBlock {
             base_size: user_sp,
             heap_bottom: user_sp,
             program_brk: user_sp,
+            syscall_count: [0; MAX_SYSCALL_NUM],
         };
         // prepare TrapContext in user space
         let trap_cx = task_control_block.get_trap_cx();
