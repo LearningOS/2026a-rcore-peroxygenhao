@@ -1,0 +1,20 @@
+{
+  "schema": 1,
+  "courseId": 2073,
+  "repository": "LearningOS/2026a-rcore-peroxygenhao",
+  "user": "peroxygenhao",
+  "totalScore": 500,
+  "chapters": {
+    "ch3": {
+      "points": "7/7",
+      "score": 100,
+      "commit": "e897e5a524a8da8888050a08ad16b7d485c887c1"
+    }
+  },
+  "score": 100,
+  "upload": {
+    "status": "pending",
+    "runId": "40153151227",
+    "runAttempt": "1"
+  }
+}
