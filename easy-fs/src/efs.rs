@@ -130,6 +130,20 @@ impl EasyFileSystem {
         self.inode_bitmap.alloc(&self.block_device).unwrap() as u32
     }
 
+    /// Get the inode id of the inode placed at (block_id, block_offset)
+    pub fn get_inode_id(&self, block_id: u32, block_offset: usize) -> u32 {
+        let inode_size = core::mem::size_of::<DiskInode>();
+        let inodes_per_block = (BLOCK_SZ / inode_size) as u32;
+        (block_id - self.inode_area_start_block) * inodes_per_block
+            + (block_offset / inode_size) as u32
+    }
+
+    /// Recycle an inode id, so that it can be reused later
+    pub fn dealloc_inode(&mut self, inode_id: u32) {
+        self.inode_bitmap
+            .dealloc(&self.block_device, inode_id as usize)
+    }
+
     /// Allocate a data block
     pub fn alloc_data(&mut self) -> u32 {
         self.data_bitmap.alloc(&self.block_device).unwrap() as u32 + self.data_area_start_block
