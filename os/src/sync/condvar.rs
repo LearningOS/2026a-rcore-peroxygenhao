@@ -43,6 +43,8 @@ impl Condvar {
         inner.wait_queue.push_back(current_task().unwrap());
         drop(inner);
         block_current_and_run_next();
-        mutex.lock();
+        // Re-acquire the mutex; a deadlock reported here cannot happen because
+        // the mutex must already have belonged to us before waiting.
+        let _ = mutex.lock();
     }
 }

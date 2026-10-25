@@ -1,4 +1,6 @@
-use crate::sync::{Condvar, Mutex, MutexBlocking, MutexSpin, Semaphore};
+use crate::sync::{
+    set_deadlock_detect, Condvar, Mutex, MutexBlocking, MutexSpin, Semaphore,
+};
 use crate::task::{block_current_and_run_next, current_process, current_task};
 use crate::timer::{add_timer, get_time_ms};
 use alloc::sync::Arc;
@@ -73,8 +75,7 @@ pub fn sys_mutex_lock(mutex_id: usize) -> isize {
     let mutex = Arc::clone(process_inner.mutex_list[mutex_id].as_ref().unwrap());
     drop(process_inner);
     drop(process);
-    mutex.lock();
-    0
+    mutex.lock()
 }
 /// mutex unlock syscall
 pub fn sys_mutex_unlock(mutex_id: usize) -> isize {
@@ -166,8 +167,8 @@ pub fn sys_semaphore_down(sem_id: usize) -> isize {
     let process_inner = process.inner_exclusive_access();
     let sem = Arc::clone(process_inner.semaphore_list[sem_id].as_ref().unwrap());
     drop(process_inner);
-    sem.down();
-    0
+    drop(process);
+    sem.down()
 }
 /// condvar create syscall
 pub fn sys_condvar_create() -> isize {
@@ -244,8 +245,12 @@ pub fn sys_condvar_wait(condvar_id: usize, mutex_id: usize) -> isize {
 }
 /// enable deadlock detection syscall
 ///
-/// YOUR JOB: Implement deadlock detection, but might not all in this syscall
-pub fn sys_enable_deadlock_detect(_enabled: usize) -> isize {
-    trace!("kernel: sys_enable_deadlock_detect NOT IMPLEMENTED");
-    -1
+/// Turns the system wide deadlock detector on or off. The detector itself lives
+/// in the blocking mutex / semaphore primitives and in the wait-for graph they
+/// maintain.
+pub fn sys_enable_deadlock_detect(enabled: usize) -> isize {
+    let enabled = enabled != 0;
+    trace!("kernel: sys_enable_deadlock_detect({})", enabled);
+    set_deadlock_detect(enabled);
+    0
 }
