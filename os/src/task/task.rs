@@ -1,7 +1,7 @@
 //! Types related to task management & Functions for completely changing TCB
 use super::TaskContext;
 use super::{kstack_alloc, pid_alloc, KernelStack, PidHandle};
-use crate::config::TRAP_CONTEXT_BASE;
+use crate::config::{BIG_STRIDE, DEFAULT_PRIORITY, MIN_PRIORITY, TRAP_CONTEXT_BASE};
 use crate::mm::{MemorySet, PhysPageNum, VirtAddr, KERNEL_SPACE};
 use crate::sync::UPSafeCell;
 use crate::trap::{trap_handler, TrapContext};
@@ -68,9 +68,33 @@ pub struct TaskControlBlockInner {
 
     /// Program break
     pub program_brk: usize,
+
+    /// Scheduling priority; larger means more CPU time
+    pub priority: usize,
+
+    /// Stride of the current priority, namely `BIG_STRIDE / priority`
+    pub stride: usize,
+
+    /// Accumulated pass value used by the stride scheduler
+    pub pass: usize,
 }
 
 impl TaskControlBlockInner {
+    /// Change the priority of the process.
+    ///
+    /// Returns `false` when `priority` is below `MIN_PRIORITY`, in which case
+    /// the task keeps its old value.
+    pub fn set_priority(&mut self, priority: usize) -> bool {
+        if priority < MIN_PRIORITY {
+            return false;
+        }
+        self.priority = priority;
+        // A huge priority would make the stride collapse to zero; keep it at 1
+        // so the pass value still grows monotonically.
+        self.stride = (BIG_STRIDE / priority).max(1);
+        true
+    }
+
     /// get the trap context
     pub fn get_trap_cx(&self) -> &'static mut TrapContext {
         self.trap_cx_ppn.get_mut()
@@ -118,6 +142,9 @@ impl TaskControlBlock {
                     exit_code: 0,
                     heap_bottom: user_sp,
                     program_brk: user_sp,
+                    priority: DEFAULT_PRIORITY,
+                    stride: BIG_STRIDE / DEFAULT_PRIORITY,
+                    pass: 0,
                 })
             },
         };
@@ -191,6 +218,9 @@ impl TaskControlBlock {
                     exit_code: 0,
                     heap_bottom: parent_inner.heap_bottom,
                     program_brk: parent_inner.program_brk,
+                    priority: parent_inner.priority,
+                    stride: parent_inner.stride,
+                    pass: parent_inner.pass,
                 })
             },
         });
@@ -204,6 +234,24 @@ impl TaskControlBlock {
         task_control_block
         // **** release child PCB
         // ---- release parent PCB
+    }
+
+    /// Create a new process running `elf_data` as a child of `self`.
+    ///
+    /// Unlike `fork`, the new process starts from the entry point of the given
+    /// ELF and does not share the parent's address space.
+    pub fn spawn(self: &Arc<Self>, elf_data: &[u8]) -> Arc<Self> {
+        let task_control_block = Arc::new(TaskControlBlock::new(elf_data));
+        {
+            let mut parent_inner = self.inner_exclusive_access();
+            // The child inherits the parent's scheduling priority.
+            let mut child_inner = task_control_block.inner_exclusive_access();
+            child_inner.parent = Some(Arc::downgrade(self));
+            child_inner.priority = parent_inner.priority;
+            child_inner.stride = parent_inner.stride;
+            parent_inner.children.push(task_control_block.clone());
+        }
+        task_control_block
     }
 
     /// get pid of process

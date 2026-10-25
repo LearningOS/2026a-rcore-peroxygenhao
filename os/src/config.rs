@@ -21,3 +21,10 @@ pub const TRAP_CONTEXT_BASE: usize = TRAMPOLINE - PAGE_SIZE;
 pub const CLOCK_FREQ: usize = 12500000;
 /// the physical memory end
 pub const MEMORY_END: usize = 0x88000000;
+
+/// the base of the stride value used by the stride scheduler
+pub const BIG_STRIDE: usize = 1 << 20;
+/// the priority a task gets when it is created
+pub const DEFAULT_PRIORITY: usize = 2;
+/// the smallest priority a task may ask for, larger priority means more CPU time
+pub const MIN_PRIORITY: usize = 2;
